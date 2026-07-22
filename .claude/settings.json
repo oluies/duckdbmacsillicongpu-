@@ -1,0 +1,15 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(roborev show *)",
+      "Bash(roborev list *)",
+      "Bash(roborev list)",
+      "Bash(git fetch *)",
+      "mcp__safari-mcp-stp__screenshot",
+      "mcp__safari-mcp-stp__navigate_to_url",
+      "mcp__safari-mcp-stp__list_tabs",
+      "mcp__safari-mcp-stp__list_network_requests",
+      "mcp__safari-mcp-stp__browser_console_messages"
+    ]
+  }
+}

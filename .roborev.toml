@@ -1,0 +1,14 @@
+# Agent that performs the reviews and any auto-fixes
+agent = "claude-code"
+
+# What reviewers should weight for this project
+[review]
+guidelines = """
+This is a GPU accelerator for DuckDB on Apple Silicon. Prioritize, in review:
+- Numerical correctness of GPU operators versus DuckDB CPU output, including null handling
+  and integer overflow in SUM-style aggregations.
+- Whether every unsupported operator or type has a working CPU fallback path.
+- Benchmark honesty: GPU timings must include Arrow conversion cost, not kernel time alone.
+- Memory safety in kernels and in the Arrow/GPU buffer handoff.
+- Dead code and speculative operators that were not proven faster than CPU DuckDB.
+"""

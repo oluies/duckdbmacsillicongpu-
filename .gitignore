@@ -1,0 +1,9 @@
+.venv/
+__pycache__/
+*.pyc
+
+# Phase 0 spike artifacts: generated datasets are large and reproducible from seed
+*.duckdb
+*.duckdb.wal
+*.parquet
+data/
