@@ -57,8 +57,9 @@ def cpu_pca(con, iters=0):
     n = X.shape[0]
     gram = (X.T @ X) / n                              # O(N*D^2) on BLAS
     M = gram
-    for _ in range(iters):                           # load-once, compute-many
+    for _ in range(iters):                           # load-once, compute-many (power iteration)
         M = (X.T @ (X @ M)) / n
+        M = M / (np.max(np.abs(M)) + 1e-30)          # renormalize: keep float32 finite
     evals = np.linalg.eigvalsh(gram)                 # O(D^3), tiny
     top = np.sort(evals)[::-1][:TOP_K]
     return np.asarray(gram, dtype=np.float64), np.asarray(top, dtype=np.float64), np.asarray(M)
@@ -70,8 +71,9 @@ def gpu_pca(con, iters=0):
     n = X.shape[0]
     gram = (X.T @ X) / n                             # O(N*D^2) on the Apple GPU
     M = gram
-    for _ in range(iters):                           # load-once, compute-many
+    for _ in range(iters):                           # load-once, compute-many (power iteration)
         M = (X.T @ (X @ M)) / n
+        M = M / (mx.max(mx.abs(M)) + 1e-30)          # renormalize: keep float32 finite
     mx.eval(gram, M)                                 # force the heavy compute
     # Eigendecomposition is CPU-only in MLX 0.32; D x D is trivial, run on a CPU stream.
     evals = mx.linalg.eigh(gram, stream=mx.cpu)[0]
@@ -101,8 +103,8 @@ def main() -> int:
     print(f"runs          = {args.runs} (best-of, after 1 warmup)")
     print("measuring ...")
 
-    g_cpu, top_cpu, _ = cpu_pca(con, args.iters)
-    g_gpu, top_gpu, _ = gpu_pca(con, args.iters)
+    g_cpu, top_cpu, m_cpu = cpu_pca(con, args.iters)
+    g_gpu, top_gpu, m_gpu = gpu_pca(con, args.iters)
 
     cpu_times: list = []
     gpu_times: list = []
@@ -118,7 +120,11 @@ def main() -> int:
 
     gram_rel = float(np.max(np.abs(g_cpu - g_gpu)) / (np.max(np.abs(g_cpu)) + 1e-12))
     eig_rel = float(np.max(np.abs(top_cpu - top_gpu)) / (np.max(np.abs(top_cpu)) + 1e-12))
-    correct = gram_rel < 1e-3 and eig_rel < 1e-3
+    # Also verify the power-iteration result M — the repeated-matmul path is the
+    # heavy compute being timed and headlined, so it must be cross-checked, not the
+    # Gram proxy alone. Both sides renormalize each step, so M is O(1)-scaled.
+    m_rel = float(np.max(np.abs(m_cpu - m_gpu)) / (np.max(np.abs(m_cpu)) + 1e-12))
+    correct = gram_rel < 1e-3 and eig_rel < 1e-3 and m_rel < 1e-3
 
     print()
     print(f"operator      = pca_gram_eigh")
@@ -127,7 +133,8 @@ def main() -> int:
     print(f"ratio         = {ratio:.2f}x  ({'speedup' if ratio > 1 else 'slowdown'})")
     print(f"cpu_GFLOP/s   = {flops/1e9/cpu_s:.0f}")
     print(f"gpu_GFLOP/s   = {flops/1e9/gpu_s:.0f}")
-    print(f"correct       = {correct}  (Gram rel {gram_rel:.2e}, top-{TOP_K} eig rel {eig_rel:.2e})")
+    print(f"correct       = {correct}  (Gram rel {gram_rel:.2e}, top-{TOP_K} eig rel {eig_rel:.2e}, "
+          f"iter-M rel {m_rel:.2e})")
 
     if not correct:
         print("verdict       = FAIL (incorrect)")

@@ -33,6 +33,18 @@ def verify(cpu: dict, gpu: dict, rtol: float = config.FLOAT_SUM_RTOL) -> tuple[b
             return False, f"integer SUM mismatch for key {k}: CPU {c_si} != GPU {g_si}"
         if int(c_c) != int(g_c):
             return False, f"COUNT mismatch for key {k}: CPU {c_c} != GPU {g_c}"
+        # NaN/inf must be a hard mismatch, checked BEFORE the tolerance test.
+        # An all-NULL val_d group makes DuckDB's SUM return NULL -> NaN here, while
+        # the GPU path fills NULLs with 0.0 -> 0.0. Without this guard `rel` is NaN,
+        # `NaN > rtol` is False, and the disagreement would pass silently — defeating
+        # the gate's only correctness safeguard.
+        if math.isnan(c_sd) != math.isnan(g_sd) or math.isinf(c_sd) or math.isinf(g_sd):
+            return False, (
+                f"float SUM NULL/non-finite disagreement for key {k}: "
+                f"CPU {c_sd} vs GPU {g_sd} (one is NaN/inf, the other is not)"
+            )
+        if math.isnan(c_sd) and math.isnan(g_sd):
+            continue  # both NULL for this group -> agree, nothing to tolerance-check
         denom = abs(c_sd) if abs(c_sd) > 1e-9 else 1.0
         rel = abs(c_sd - g_sd) / denom
         worst_rel = max(worst_rel, rel)
