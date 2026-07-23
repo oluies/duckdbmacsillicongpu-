@@ -27,19 +27,43 @@ SELECT id, gpu_pca(embedding, 20) FROM vectors;   -- UDF -> NATS req -> worker -
 ```
 
 This is the **transport for the out-of-process GPU kernel service** in `udf-gateway.md`
-(Option B / Cyfra, or a remote MLX box): DuckDB (C++) never links the compute runtime — it
-sends an Arrow batch over NATS and gets Arrow back. It also decouples any external enrichment,
-model inference, or legacy service call.
+(Option B / Cyfra, or a remote MLX box), and it decouples any external enrichment, model
+inference, or legacy service call.
 
-**But the measured lesson carries over, harder.** The PCA spike showed the *handoff* is the
-bottleneck, not the compute. A NATS round-trip adds a process hop + serialization on top. So:
+### Split the control plane from the data plane
 
-- **Batch, never per-row.** Use the Arrow-vectorized UDF (`create_function(..., type="arrow")`,
-  verified working) so one request carries a whole column chunk, not one row. Per-row
-  request-reply would be latency-bound and pointless.
-- **Keep sessions resident.** For the GPU case the matrix must live in the worker across calls
-  (a handle model), or you re-pay extraction *and* the NATS round-trip every op — back under
-  the 3× bar.
+The important design choice: **NATS carries only the command, not the bulk data.** The request
+is small and O(1) in data size — a kernel id + a *reference* to the input (a SQL query, a
+table/file path, a sequence range, a shared-memory handle) + params. The worker pulls the
+actual columns **out of band**, by whatever path is fastest:
+
+- **On one box (the common case)**: the worker is a GPU-enabled DuckDB sidecar that opens the
+  same database/Parquet read-only and runs the query itself, materializing its input via
+  DuckDB's own local Arrow export — so there is **no cross-process Arrow serialization at all**.
+  Or a shared `mmap` / Arrow IPC file both sides agree on, near zero-copy on unified memory.
+- **Across machines**: shared object storage (S3), or Arrow Flight for the bulk stream, with
+  NATS still only signaling "run kernel K over query Q, params P".
+
+The reply over NATS is likewise small — the result itself when it is tiny (PCA eigenvalues,
+a scalar, a class label), or a *pointer* to where a large result was written (shared file /
+object store), never the large result inlined.
+
+**This dissolves most of the round-trip caveat.** The concern was that a NATS hop +
+serialization would compete with the data transfer and erode the win. With control/data split,
+the NATS message is just a control signal (sub-millisecond, data-size-independent); the only
+cost that remains is the *worker's own* data load — which is the same load-once-compute-many
+residency question as the in-process gateway, now cleanly separated:
+
+- **Keep the worker's session resident.** The matrix must live in the worker across commands (a
+  handle model: `load(ref) -> handle`, then `pca(handle, k)`), or it re-pays extraction every
+  command. But note that extraction is now a *local* DuckDB→GPU load in the worker, not a
+  cross-process transfer — the fast path the PCA spike already measured at ~5×.
+- **Batch at the command level, not per row.** One command processes a whole query/partition,
+  not one row.
+
+The upshot: the earlier "handoff is the bottleneck" lesson still says *keep data resident and
+load locally* — but moving the command over NATS costs essentially nothing, because the data
+never rides the bus.
 
 ### 2. Streaming egress — DuckDB as a producer
 
@@ -89,11 +113,14 @@ UDF must therefore:
 ## Recommendation
 
 - **Reuse `nats_js` for inbound.** Build only the outbound/bidirectional side.
-- **Start with the request-reply command UDF**, Arrow-batched, as the transport for the
-  out-of-process GPU gateway — this is the piece that unlocks the portable (Cyfra) or
-  remote-MLX story from `udf-gateway.md`. Spike it the same honest way: measure the Arrow +
-  NATS round-trip against an in-process baseline on the PCA workload; if the round-trip erodes
-  the ~5× resident-session win below 3×, that scopes where an external gateway is worth it.
+- **Start with the request-reply command UDF**, control/data split (command over NATS, data
+  loaded locally by the worker) — this unlocks the portable (Cyfra) or remote-MLX story from
+  `udf-gateway.md`. Spike it the honest way: a GPU-enabled DuckDB sidecar that receives a query
+  over NATS, loads its input locally, runs the resident-session PCA workload, and replies with
+  the small result. Measure end to end against the in-process baseline; the question is now
+  whether the worker's *local* load-once-compute-many holds the ~5× (it should — same fast path
+  the spike measured), plus a sub-millisecond control hop — not whether a bulk transfer over the
+  bus survives.
 - **Streaming egress** second (low risk).
 - **CDC**: prototype watermark-polling only, labeled as not log-based.
 

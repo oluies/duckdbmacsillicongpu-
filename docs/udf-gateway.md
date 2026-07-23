@@ -56,9 +56,11 @@ handles in the UDF module's state.
 
 > **Transport note.** An out-of-process backend needs a wire between DuckDB and the service.
 > NATS request-reply is a clean, language-agnostic option (and reaches a JVM/Cyfra worker
-> without the in-process JVM boundary) — see [`nats-gateway.md`](./nats-gateway.md). The same
-> measured caveat applies: batch over Arrow and keep the session resident, or the round-trip
-> erodes the win.
+> without the in-process JVM boundary) — see [`nats-gateway.md`](./nats-gateway.md). Key move:
+> send only the *command* over NATS (a query/kernel ref + params) and have the worker load the
+> data **out of band** — ideally a GPU-enabled DuckDB sidecar that runs the query locally, so no
+> bulk data crosses the bus. The residency lesson still holds (keep the worker's session
+> resident), but the control hop is data-size-independent.
 
 ### Option B — Cyfra, out-of-process (portable). Revisit trigger, not default.
 
