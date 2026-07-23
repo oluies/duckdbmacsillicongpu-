@@ -54,6 +54,12 @@ handles in the UDF module's state.
 - **Cons**: Apple-only; MLX is an array framework (you assemble kernels from primitives); no
   cross-vendor story.
 
+> **Transport note.** An out-of-process backend needs a wire between DuckDB and the service.
+> NATS request-reply is a clean, language-agnostic option (and reaches a JVM/Cyfra worker
+> without the in-process JVM boundary) — see [`nats-gateway.md`](./nats-gateway.md). The same
+> measured caveat applies: batch over Arrow and keep the session resident, or the round-trip
+> erodes the win.
+
 ### Option B — Cyfra, out-of-process (portable). Revisit trigger, not default.
 
 [Cyfra](https://github.com/ComputeNode/cyfra) compiles a **Scala 3 DSL → SPIR-V → Vulkan**
