@@ -7,3 +7,5 @@ __pycache__/
 *.duckdb.wal
 *.parquet
 data/
+# roborev snapshots
+/.roborev/

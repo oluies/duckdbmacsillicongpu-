@@ -10,6 +10,13 @@ Phase 0 (User Story 1) is a hard gate. **No task in Phase 1 or Phase 2 may start
 gate)` result is a documented project stop — Phases 1 and 2 are abandoned, not deferred. This
 mirrors Constitution Principle I and is not negotiable at the task level.
 
+> ## 🛑 GATE RESULT (2026-07-23): FAIL — project STOPS at Phase 0
+> On Apple M5 Pro / 48 GB, 300M rows: CPU DuckDB **0.83 s** vs Apple GPU **9.84 s**
+> (end to end, Arrow included) = **0.08×**. Result is numerically exact; it is simply ~12×
+> slower. Just moving data to the GPU (~3.4 s) already costs ~4× the entire CPU job, so even a
+> zero-cost kernel loses. **Phases 4–7 (T012–T028) are NOT started, by design.** Full analysis
+> in `spike/README.md`. Phase 0 tasks (T001–T011) are complete.
+
 Legend: `[P]` = parallelizable (different files, no incomplete dependency). Story labels
 `[US1]`/`[US2]`/`[US3]` map to the three user stories in spec.md.
 
@@ -17,16 +24,16 @@ Legend: `[P]` = parallelizable (different files, no incomplete dependency). Stor
 
 ## Phase 1: Setup
 
-- [ ] T001 Create `spike/` directory and a `data/` (gitignored) output location per plan.md project structure
-- [ ] T002 [P] Add a `spike/README.md` stating the spike is throwaway and gated: PASS unlocks Phase 1, FAIL stops the project
-- [ ] T003 Verify the venv satisfies the spike: `duckdb`, `pyarrow`, `mlx`, `numpy` importable and `mlx.core.default_device()` is a GPU (record output in `spike/README.md`)
+- [x] T001 Create `spike/` directory and a `data/` (gitignored) output location per plan.md project structure
+- [x] T002 [P] Add a `spike/README.md` stating the spike is throwaway and gated: PASS unlocks Phase 1, FAIL stops the project
+- [x] T003 Verify the venv satisfies the spike: `duckdb`, `pyarrow`, `mlx`, `numpy` importable and `mlx.core.default_device()` is a GPU (record output in `spike/README.md`)
 
 ---
 
 ## Phase 2: Foundational (blocking prerequisites for the spike)
 
-- [ ] T004 Fix the run constants (seed=42, rows≈300_000_000, key cardinality) in one place `spike/config.py` so CPU and GPU read identical bytes (data-model.md § BenchmarkDataset)
-- [ ] T005 Decide and document the honest-timing contract in `spike/timing.py`: a context manager whose GPU span includes Arrow export + MLX conversion + compute + `mx.eval()` + host materialization (research.md R5, contract G1)
+- [x] T004 Fix the run constants (seed=42, rows≈300_000_000, key cardinality) in one place `spike/config.py` so CPU and GPU read identical bytes (data-model.md § BenchmarkDataset)
+- [x] T005 Decide and document the honest-timing contract in `spike/timing.py`: a context manager whose GPU span includes Arrow export + MLX conversion + compute + `mx.eval()` + host materialization (research.md R5, contract G1)
 
 **Checkpoint**: constants and timing helper exist; the spike scripts can be built on them.
 
@@ -41,12 +48,12 @@ against the 3× bar.
 `bench_groupby.py` runs to completion, verifies correctness, and prints the verdict; exit code
 is 0 only on PASS. (spec.md US1, contracts/spike-cli.md)
 
-- [ ] T006 [US1] Implement `spike/generate_data.py`: reproducible ~300M-row dataset (INT `key`, INT64 `val_i`, DOUBLE `val_d`, with some NULLs) into a DuckDB file from the fixed seed; print row count + distinct-key count (FR-001, data-model.md)
-- [ ] T007 [US1] Implement the CPU baseline in `spike/bench_groupby.py`: `SELECT key, SUM(val_i), SUM(val_d), COUNT(*) FROM t GROUP BY key`, timed with `spike/timing.py` (FR-002)
-- [ ] T008 [US1] Implement the GPU path in `spike/bench_groupby.py`: export columns as Arrow, convert to MLX, sort-based group-by (argsort → gather → segment boundaries → segmented SUM + COUNT), `mx.eval()`, materialize back — all inside the GPU timing span (FR-003, FR-005, FR-018, research.md R2/R4)
-- [ ] T009 [US1] Implement `spike/verify.py`: sort both results by `key`; assert exact equality on `key`, `count`, and integer `sum_i`; compare float `sum_d` within a documented tolerance; handle NULL key group and skipped-NULL values (FR-004, SC-003, research.md R6)
-- [ ] T010 [US1] Wire the verdict in `spike/bench_groupby.py`: `PASS` iff correct AND ratio ≥ gate(3.0); print full benchmark record; on `FAIL (under gate)` also print the explicit "project is expected to stop at Phase 0" sentence; exit non-zero on any FAIL (FR-007, contract G2/G5)
-- [ ] T011 [US1] Run the gate end-to-end on this machine; record the actual `cpu_seconds`, `gpu_seconds`, `ratio`, and `verdict` in `spike/README.md`
+- [x] T006 [US1] Implement `spike/generate_data.py`: reproducible ~300M-row dataset (INT `key`, INT64 `val_i`, DOUBLE `val_d`, with some NULLs) into a DuckDB file from the fixed seed; print row count + distinct-key count (FR-001, data-model.md)
+- [x] T007 [US1] Implement the CPU baseline in `spike/bench_groupby.py`: `SELECT key, SUM(val_i), SUM(val_d), COUNT(*) FROM t GROUP BY key`, timed with `spike/timing.py` (FR-002)
+- [x] T008 [US1] Implement the GPU path in `spike/bench_groupby.py`: export columns as Arrow, convert to MLX, sort-based group-by (argsort → gather → segment boundaries → segmented SUM + COUNT), `mx.eval()`, materialize back — all inside the GPU timing span (FR-003, FR-005, FR-018, research.md R2/R4)
+- [x] T009 [US1] Implement `spike/verify.py`: sort both results by `key`; assert exact equality on `key`, `count`, and integer `sum_i`; compare float `sum_d` within a documented tolerance; handle NULL key group and skipped-NULL values (FR-004, SC-003, research.md R6)
+- [x] T010 [US1] Wire the verdict in `spike/bench_groupby.py`: `PASS` iff correct AND ratio ≥ gate(3.0); print full benchmark record; on `FAIL (under gate)` also print the explicit "project is expected to stop at Phase 0" sentence; exit non-zero on any FAIL (FR-007, contract G2/G5)
+- [x] T011 [US1] Run the gate end-to-end on this machine; record the actual `cpu_seconds`, `gpu_seconds`, `ratio`, and `verdict` in `spike/README.md`
 
 **🚦 GATE CHECKPOINT**: If T011 is `PASS`, Phase 1 is unlocked. If `FAIL`, stop here, record
 the negative result, and do not proceed to Phase 4+.

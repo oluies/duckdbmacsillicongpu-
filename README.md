@@ -112,4 +112,20 @@ handoff, and dead speculative operators.
 
 ## Status
 
-Phase 0 has not been run. No performance claim has been validated.
+**Phase 0 ran on 2026-07-23 (Apple M5 Pro, 48 GB) and FAILED the gate — the project stops
+here, by design.**
+
+On a 300M-row `GROUP BY … SUM, COUNT`, CPU DuckDB took **0.83 s**; the Apple GPU path (MLX,
+end to end with Arrow conversion) took **9.84 s** — a **0.08×** result, i.e. the GPU is ~12×
+slower. The GPU answer is numerically exact; it is simply not fast enough, and does not come
+close to the 3× bar.
+
+Why: on unified memory there is no host-to-device transfer to amortize, so the CPU engine —
+already sitting on the data — is hard to beat. Just moving the columns out of DuckDB into
+GPU-computable form costs ~3.4 s, about **4× the entire CPU aggregation**, before any GPU
+compute happens. Even a hypothetical zero-cost kernel would lose. This is exactly the risk the
+constitution's Principle I was written to catch cheaply — and it did, in a throwaway spike, at
+the cost of one afternoon rather than a kernel library and a C++ extension.
+
+Full analysis and reproduction steps: [`spike/README.md`](./spike/README.md). Phases 1–2 are
+not started.
