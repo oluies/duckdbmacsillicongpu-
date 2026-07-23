@@ -127,5 +127,16 @@ compute happens. Even a hypothetical zero-cost kernel would lose. This is exactl
 constitution's Principle I was written to catch cheaply — and it did, in a throwaway spike, at
 the cost of one afternoon rather than a kernel library and a C++ extension.
 
+Two follow-on findings, both measured (see [`spike/README.md`](./spike/README.md)):
+
+- **Bigger data does not help — it hurts.** Across 2M → 300M rows the ratio falls monotonically
+  (0.59× → 0.08×). CPU scales linearly; the GPU path scales worse (O(n·log n) sort + O(n) Arrow
+  conversion), so there is no fixed overhead for large data to amortize.
+- **The GPU wins on arithmetic intensity, not size.** A `GROUP BY … SUM` is memory-bound (~one
+  add per row). The Apple GPU pulls ahead only on compute-bound, high-FLOP-per-byte work —
+  matrix algebra, PCA/SVD, ML, FFTs — where the one-time Arrow handoff is amortized over many
+  FLOPs. That is a numerical layer *on top of* DuckDB, not a replacement for its relational
+  operators, and would be a different project with its own spike.
+
 Full analysis and reproduction steps: [`spike/README.md`](./spike/README.md). Phases 1–2 are
 not started.

@@ -46,6 +46,50 @@ on Apple Silicon the CPU engine already sits on the data in the same memory. Eve
 Arrow export alone (1.8 s) already exceeds the whole CPU aggregation. To clear the 3× gate the
 entire GPU path would have to finish in < 0.28 s, which the data movement alone rules out.
 
+## Data-size sensitivity — bigger does NOT help (measured)
+
+A natural hypothesis is "the dataset just needs to be very large for the GPU to win." The
+measurement refutes it for this operator — larger data makes the GPU **worse**, monotonically:
+
+| rows | CPU DuckDB | Apple GPU (end to end) | ratio |
+|---:|---:|---:|---:|
+| 2 M | 0.025 s | 0.042 s | 0.59× |
+| 10 M | 0.051 s | 0.112 s | 0.46× |
+| 50 M | 0.153 s | 0.576 s | 0.27× |
+| 100 M | 0.275 s | 1.261 s | 0.22× |
+| 300 M | 0.832 s | 9.836 s | 0.08× |
+
+CPU DuckDB scales linearly (3× the rows → ~3× the time). The GPU path scales **worse** than
+linearly: the Arrow export and null-fill/cast are O(rows), and the sort is O(rows·log rows), so
+there is no fixed overhead for large data to amortize away — the dominant costs grow *with* the
+data. Scaling up only widens the gap. The 2 M case looks closest to parity only because kernel-
+launch/setup overhead is a larger share there; it is still a loss.
+
+## When would the Apple GPU actually win? Arithmetic intensity, not size
+
+The deciding factor is **FLOPs per byte moved**, not row count. A relational
+`GROUP BY … SUM, COUNT` is *memory-bound*: it does roughly one add per row and touches each byte
+about once, so runtime is set by how fast you can move the columns — and CPU DuckDB is already
+sitting on those bytes in unified memory. Moving them into GPU form (~3.4 s) costs more than the
+whole CPU job (0.83 s) before any compute. No amount of extra rows changes that ratio.
+
+The GPU pulls ahead only when there is a lot of *compute per byte* — a **compute-bound**,
+high-arithmetic-intensity workload where the fixed Arrow/handoff cost is amortized many times
+over:
+
+- **Dense linear algebra** — matrix multiply is O(n³) work on O(n²) data; each element loaded is
+  reused ~n times.
+- **PCA / SVD / covariance**, and similar factorizations built on those matmuls.
+- **ML training/inference, FFTs, iterative solvers** — repeated passes of heavy arithmetic over
+  data that is loaded once.
+
+These are exactly what MLX/Metal are built for, and exactly what DuckDB's relational engine is
+*not*. A useful reframing of the negative result: the win for GPU on Apple Silicon is in the
+**analytical/numerical layer on top of DuckDB** (feed a resident column set once, then do many
+FLOPs of matrix algebra), not in replacing DuckDB's memory-bound relational operators. If the
+goal shifts toward that, it is a different project than the one this spike gated — and worth its
+own spike, measured the same honest way.
+
 ## Scope of this result
 
 - **Approach**: MLX sort-based group-by (argsort → gather → segmented reduction), the
