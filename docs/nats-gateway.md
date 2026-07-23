@@ -101,7 +101,48 @@ UDF must therefore:
 - Offer a CPU/no-op fallback and never silently drop messages on broker unavailability — surface
   the error.
 
-## Why NATS specifically
+## Transport abstraction — can we switch middleware (NATS / TIBCO EMS / …)?
+
+Yes, but with a caveat, and no single client speaks both NATS and TIBCO EMS across all
+languages. The options tier by runtime:
+
+| Tier | Option | NATS | TIBCO EMS | Notes |
+|---|---|---|---|---|
+| JVM integration framework | **Apache Camel** (350+ components) | `camel-nats` | via `camel-jms` (EMS is JMS, JNDI) | Strongest config-swap on the JVM |
+| JVM | **Spring Cloud Stream / Integration** | `spring-nats` binder | JMS support | Natural if already on Spring |
+| Polyglot sidecar | **Dapr** pub/sub building block | native component | **no** native EMS component (needs JMS bridge) | Language-agnostic, config-swap; fits a sidecar |
+| Wire standards | JMS / AMQP 1.0 / MQTT | MQTT only (NATS server speaks MQTT) | JMS + AMQP 1.0 | No one protocol covers both cleanly |
+| Bridge | Confluent connectors, Benthos/Redpanda Connect | yes | yes (EMS connector) | Hub-and-bridge, not an in-process client |
+
+**The leaky-abstraction caveat.** These converge on a lowest common denominator — basic
+publish/subscribe. What differentiates the brokers does **not** survive: NATS's sub-millisecond
+**request-reply** is native, JMS/EMS emulate it with temporary queues + correlation IDs, and
+Kafka has none; EMS's JMS transactions / durable subscribers / XA have no NATS equivalent. An
+abstraction promising "request-reply everywhere" hides very different semantics and latencies.
+
+**Recommendation for Pinion**: define a **thin internal `Transport` interface** — only the
+surface the gateway uses:
+
+```
+request(subject, command_bytes) -> reply_bytes      # command pattern (blocking or async)
+publish(subject, message_bytes)                     # streaming egress
+subscribe(subject, handler)                          # worker command intake
+```
+
+with pluggable adapters: **NATS first** (reference impl), a **JMS/EMS adapter** when an
+enterprise deployment requires it. Rationale:
+
+- The surface is tiny, so the lowest-common-denominator problem barely bites — we abstract only
+  request/publish/subscribe, not the brokers' full feature sets.
+- It avoids dragging Camel or Dapr (heavy) in for a three-method need.
+- It follows the worker runtime for free: the **Cyfra (JVM) worker gets JMS/EMS natively** (EMS
+  *is* JMS); the **MLX (Python) worker** uses `nats-py` or a light client. So "which middleware"
+  partly follows "which worker."
+- If the goal later becomes *many* middlewares or enterprise routing/transformation, graduate to
+  **Camel** (JVM) or **Dapr** (polyglot sidecar) — but that is a recorded decision with
+  justification, the same discipline as the compute-backend choice, not a default.
+
+## Why NATS specifically (the default adapter)
 
 - Native **request-reply** (command pattern) in core NATS; **JetStream** adds persistence and
   at-least-once for streaming/CDC — one system covers all three patterns.
