@@ -138,5 +138,23 @@ Two follow-on findings, both measured (see [`spike/README.md`](./spike/README.md
   FLOPs. That is a numerical layer *on top of* DuckDB, not a replacement for its relational
   operators, and would be a different project with its own spike.
 
-Full analysis and reproduction steps: [`spike/README.md`](./spike/README.md). Phases 1–2 are
-not started.
+### Follow-on spike — the compute-bound regime does win
+
+A second spike tested the arithmetic-intensity prediction directly: PCA (Gram matrix + eigen-
+decomposition) over an N×D embedding column, GPU vs CPU, both fed from the same DuckDB table
+([`spike/PCA.md`](./spike/PCA.md)). Result on 1M×512:
+
+- **A single numerical op is extraction-bound** — GPU only ~1.3×, because the O(N·D²) compute is
+  cheap next to the one-time Arrow load both engines pay.
+- **Load once, compute many wins decisively** — with 20 power-iteration matmuls on the resident
+  matrix the GPU hits **~5.5×** (12.3 TFLOP/s vs 1.9 on CPU). More compute-per-load makes the GPU
+  *better*, the mirror image of the memory-bound GROUP BY.
+
+The takeaway: the payoff is a **numerical layer on top of DuckDB** (matrix algebra, PCA/SVD, ML,
+kNN) that keeps data resident on the GPU across many ops — not a relational accelerator. That
+motivates a GPU numerical **UDF gateway**; design (MLX in-process vs Cyfra out-of-process,
+Apple-native vs portable) is in [`docs/udf-gateway.md`](./docs/udf-gateway.md).
+
+Full analysis and reproduction: [`spike/README.md`](./spike/README.md) (GROUP BY, negative) and
+[`spike/PCA.md`](./spike/PCA.md) (PCA, conditional positive). The original Phases 1–2 remain not
+started; the gateway would be a separate, separately-validated project.
